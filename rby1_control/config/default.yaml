@@ -1,0 +1,59 @@
+/**:
+  ros__parameters:
+    # Relative names are resolved inside the node namespace, normally /rby1.
+    cmd_vel_topic: cmd_vel
+    robot_state_topic: robot_state
+
+    # Versioned std_msgs/String bridge between the frontend and backend nodes.
+    control_command_topic: control/command
+    control_state_topic: control/state
+    control_event_topic: control/event
+    control_response_topic: control/response
+    control_state_publish_rate_hz: 20.0
+    control_state_timeout_sec: 1.0
+
+    power_state_topic: power_state
+    servo_state_topic: servo_state
+    power_servo_feedback_timeout_sec: 1.5
+    robot_power_service: robot_power
+    robot_servo_service: robot_servo
+    stream_control_service: stream_control
+    control_manager_service: control_manager_command
+
+    # Set false to use the backend in generic cmd_vel-only mode.
+    use_rby1_services: true
+
+    # The original mobile-base example publishes about 25 Hz.
+    publish_rate_hz: 25.0
+
+    # Safety watchdog: stale non-zero commands are replaced with zero Twist.
+    command_timeout_sec: 0.35
+    publish_zero_when_idle: true
+
+    # RB-Y1 driver manipulation and Scenario safety interfaces.
+    joint_action: robot_joint
+    cartesian_action: robot_cartesian
+    cartesian_pose_service: get_cartesian_pose
+    cancel_control_service: cancel_control
+    scenario_safety_capabilities_service: scenario_safety_capabilities
+
+    right_arm_joint_state_topic: joint_states/right_arm
+    left_arm_joint_state_topic: joint_states/left_arm
+    torso_joint_state_topic: joint_states/torso
+    head_joint_state_topic: joint_states/head
+
+    right_cartesian_ref_link: base
+    right_cartesian_target_link: ee_right
+    left_cartesian_ref_link: base
+    left_cartesian_target_link: ee_left
+
+    cartesian_state_period_sec: 0.25
+    joint_jog_minimum_time_sec: 1.0
+    cartesian_jog_minimum_time_sec: 1.0
+
+    # Explicit non-zero driver fields for manual MOVE TARGET and jog commands.
+    manual_joint_velocity_limit: 0.2
+    manual_joint_acceleration_limit: 0.2
+    manual_cartesian_linear_velocity_limit: 0.05
+    manual_cartesian_angular_velocity_limit: 0.2
+    manual_cartesian_acceleration_scaling: 0.2

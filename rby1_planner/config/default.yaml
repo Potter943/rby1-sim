@@ -1,0 +1,18 @@
+/**:
+  ros__parameters:
+    # Shared versioned std_msgs/String transport to rby1_control.
+    control_command_topic: control/command
+    control_state_topic: control/state
+    control_event_topic: control/event
+    control_response_topic: control/response
+    control_state_timeout_sec: 1.0
+
+    # DetectedObjectPose input and planner-side validity policy.
+    object_pose_topic: perception/object_pose
+    object_pose_target_frame: base
+    object_pose_max_age_sec: 0.5
+    object_pose_min_confidence: 0.5
+    object_pose_future_tolerance_sec: 0.05
+
+    # Keep TF lookup non-blocking in the default single-threaded executor.
+    object_pose_tf_timeout_sec: 0.0
