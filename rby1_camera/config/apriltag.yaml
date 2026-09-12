@@ -1,10 +1,16 @@
-apriltag_node:
+/**:
   ros__parameters:
     # 사용할 마커 종류 (기본값)
     family: "36h11"
     # 출력한 마커 검은색 테두리의 실제 가로 길이 (단위: 미터)
     size: 0.035
-    # 3D 좌표계(TF)를 ROS 네트워크로 송출하여 조작(Manipulation) 등에 사용할 수 있게 함
-    publish_tf: true
+    # pose 추정을 켜면 apriltag_ros가 detection 시각의 TF를 송출합니다.
+    pose_estimation_method: "pnp"
     # 이미지 전송 시 압축하지 않고 원본 사용
     image_transport: "raw"
+
+    # Planner와 mock이 공통으로 사용하는 object/tag 이름입니다.
+    tag:
+      ids: [0]
+      frames: ["tag_0"]
+      sizes: [0.035]

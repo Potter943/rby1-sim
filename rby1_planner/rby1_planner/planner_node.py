@@ -6,7 +6,7 @@ from typing import Optional
 from rby1_control.frontend_node import ControlFrontendNode
 
 from .camera import CameraClient
-from .task_commands import TaskDefinition
+from .task_commands import RunnableTaskDefinition
 from .task_runner import PlannerTaskRunner
 
 
@@ -59,13 +59,14 @@ class PlannerNode(ControlFrontendNode):
         self.task_runner = PlannerTaskRunner(
             self,
             self,
+            camera=self.camera,
             on_status=self._task_status,
         )
         self.get_logger().info(
             'Planner frontend is ready and idle; no automatic task is configured.'
         )
 
-    def run_task(self, task: TaskDefinition) -> None:
+    def run_task(self, task: RunnableTaskDefinition) -> None:
         """Start one explicitly supplied Task through the control backend."""
 
         self.task_runner.start(task)

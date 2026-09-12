@@ -12,6 +12,9 @@ from launch_ros.actions import Node
 def generate_launch_description():
     package_share = Path(get_package_share_directory('rby1_camera'))
     default_config = str(package_share / 'config' / 'mock_object_pose.yaml')
+    default_mount_config = str(
+        package_share / 'config' / 'mock_camera_mount_tf.yaml'
+    )
 
     namespace_arg = DeclareLaunchArgument(
         'namespace',
@@ -22,6 +25,20 @@ def generate_launch_description():
         'config',
         default_value=default_config,
         description='Mock object-pose parameter file.',
+    )
+    mount_config_arg = DeclareLaunchArgument(
+        'mount_config',
+        default_value=default_mount_config,
+        description='End-effector-to-camera static TF parameter file.',
+    )
+
+    camera_mount_tf = Node(
+        package='rby1_camera',
+        executable='camera_mount_tf_publisher',
+        name='camera_mount_tf_publisher',
+        namespace=LaunchConfiguration('namespace'),
+        parameters=[LaunchConfiguration('mount_config')],
+        output='screen',
     )
 
     mock_publisher = Node(
@@ -37,5 +54,7 @@ def generate_launch_description():
     return LaunchDescription([
         namespace_arg,
         config_arg,
+        mount_config_arg,
+        camera_mount_tf,
         mock_publisher,
     ])

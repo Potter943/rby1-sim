@@ -8,7 +8,15 @@ from typing import Callable, Optional
 
 from rby1_control.backend_contract import TaskBackendState, TaskCommandStatus
 
-from .task_commands import CommandKind, TaskCommand, TaskDefinition, list_sum
+from .task_commands import (
+    CameraLinearAbsoluteStep,
+    CommandKind,
+    DynamicTaskDefinition,
+    RunnableTaskDefinition,
+    TaskCommand,
+    TaskDefinition,
+    list_sum,
+)
 
 
 class PlannerTaskRunner:
@@ -19,12 +27,14 @@ class PlannerTaskRunner:
     CARTESIAN_TIMEOUT_MIN_SEC = 30.0
     MOTION_TIMEOUT_SCALE = 3.0
     MOTION_TIMEOUT_MARGIN_SEC = 5.0
+    CAMERA_IDLE_TIMEOUT_SEC = 3.0
 
     def __init__(
         self,
         node,
         backend,
         *,
+        camera=None,
         on_status: Optional[Callable[[str], None]] = None,
         on_active_changed: Optional[Callable[[bool], None]] = None,
         clock: Callable[[], float] = time.monotonic,
@@ -33,12 +43,13 @@ class PlannerTaskRunner:
         if not math.isfinite(float(period_sec)) or float(period_sec) <= 0.0:
             raise ValueError('period_sec must be a positive finite number')
         self.backend = backend
+        self.camera = camera
         self.on_status = on_status or (lambda _message: None)
         self.on_active_changed = on_active_changed or (lambda _active: None)
         self.clock = clock
         self._timer = node.create_timer(float(period_sec), self.tick)
         self._timer.cancel()
-        self._task: Optional[TaskDefinition] = None
+        self._task: Optional[RunnableTaskDefinition] = None
         self._index = 0
         self._command_id: Optional[str] = None
         self._active_command: Optional[TaskCommand] = None
@@ -48,6 +59,10 @@ class PlannerTaskRunner:
         self._base_velocity = None
         self._stream_target: Optional[bool] = None
         self._stream_deadline = 0.0
+        self._camera_marker_ns: Optional[int] = None
+        self._camera_deadline: Optional[float] = None
+        self._camera_idle_after_state_at: Optional[float] = None
+        self._camera_idle_deadline: Optional[float] = None
 
     @property
     def active(self) -> bool:
@@ -57,11 +72,11 @@ class PlannerTaskRunner:
     def task_name(self) -> str:
         return self._task.name if self._task is not None else ''
 
-    def start(self, task: TaskDefinition) -> None:
+    def start(self, task: RunnableTaskDefinition) -> None:
         if self.active:
             raise RuntimeError('another Task is already running')
-        if not isinstance(task, TaskDefinition):
-            raise TypeError('task must be a TaskDefinition')
+        if not isinstance(task, (TaskDefinition, DynamicTaskDefinition)):
+            raise TypeError('task must be a planner Task definition')
         if not task.commands:
             raise ValueError('Task has no commands')
         self._require_safe_state(self.backend.task_state(), require_idle=True)
@@ -75,6 +90,10 @@ class PlannerTaskRunner:
         self._base_velocity = None
         self._stream_target = None
         self._stream_deadline = 0.0
+        self._camera_marker_ns = None
+        self._camera_deadline = None
+        self._camera_idle_after_state_at = None
+        self._camera_idle_deadline = None
         self.on_active_changed(True)
         self.on_status(f'Task started: {task.name}')
         self._timer.reset()
@@ -103,9 +122,16 @@ class PlannerTaskRunner:
             state = self.backend.task_state()
             self._require_safe_state(
                 state,
-                require_idle=self._command_id is None,
+                require_idle=(
+                    self._command_id is None
+                    and self._camera_idle_deadline is None
+                ),
             )
             now = self.clock()
+
+            if self._camera_idle_deadline is not None:
+                if not self._tick_camera_idle_barrier(state, now):
+                    return
 
             if self._stream_target is not None:
                 if state.stream_enabled is self._stream_target:
@@ -142,6 +168,9 @@ class PlannerTaskRunner:
                 self._command_id = None
                 self._active_command = None
                 self._complete_step()
+                if self._next_step_is_camera():
+                    self._begin_camera_idle_barrier(state, now)
+                    return
 
             if self._index >= len(self._task.commands):
                 name = self._task.name
@@ -150,6 +179,21 @@ class PlannerTaskRunner:
                 return
 
             command = self._task.commands[self._index]
+
+            # The stock driver reports a streamed Cartesian command as kOk
+            # after minimum_time without verifying target convergence. Task
+            # motions therefore always use the driver's blocking command path.
+            if (
+                not self._step_can_run_with_stream(command)
+                and state.stream_enabled is not False
+            ):
+                self._request_stream_transition(False, now)
+                return
+
+            if isinstance(command, CameraLinearAbsoluteStep):
+                self._tick_camera_linear_absolute(command, state, now)
+                return
+
             if command.kind is CommandKind.BASE_VELOCITY:
                 if state.stream_enabled is not True:
                     self._request_stream_transition(True, now)
@@ -185,6 +229,151 @@ class PlannerTaskRunner:
         except Exception as exc:
             self._fail(str(exc))
 
+    def _tick_camera_linear_absolute(
+        self,
+        command: CameraLinearAbsoluteStep,
+        state: TaskBackendState,
+        now: float,
+    ) -> None:
+        camera = self.camera
+        if camera is None:
+            raise RuntimeError(
+                'camera_linear_absolute requires a camera client'
+            )
+
+        if self._camera_marker_ns is None:
+            capture_marker = getattr(camera, 'capture_marker', None)
+            if not callable(capture_marker):
+                raise RuntimeError(
+                    'camera must provide capture_marker()'
+                )
+            marker = capture_marker()
+            if isinstance(marker, bool):
+                raise RuntimeError(
+                    'camera capture marker must be a nonnegative integer'
+                )
+            try:
+                marker_ns = int(marker)
+            except (TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    'camera capture marker must be a nonnegative integer'
+                ) from exc
+            if marker_ns < 0:
+                raise RuntimeError(
+                    'camera capture marker must be a nonnegative integer'
+                )
+            self._camera_marker_ns = marker_ns
+            self._camera_deadline = now + command.detection_timeout_sec
+            self.on_status(
+                f'Task step {self._index + 1}/{len(self._task.commands)}: '
+                f'camera_linear_absolute waiting for new '
+                f'{command.object_id!r} detection'
+            )
+            return
+
+        getter = getattr(camera, 'get_observation', None)
+        if not callable(getter):
+            raise RuntimeError(
+                'camera must provide get_observation(object_id, ...)'
+            )
+
+        query: dict[str, object] = {
+            'target_frame': 'base',
+            'newer_than_ns': self._camera_marker_ns,
+        }
+        if command.max_age_sec is not None:
+            query['max_age_sec'] = command.max_age_sec
+        if command.minimum_confidence is not None:
+            query['minimum_confidence'] = command.minimum_confidence
+        observation = getter(command.object_id, **query)
+
+        if observation is None:
+            if now >= float(self._camera_deadline):
+                detail = self._camera_unavailable_reason(command.object_id)
+                suffix = f': {detail}' if detail else ''
+                raise RuntimeError(
+                    f'camera detection timed out for {command.object_id!r} '
+                    f'after {command.detection_timeout_sec:.3f}s{suffix}'
+                )
+            return
+
+        resolved = command.resolve_observation(observation)
+        self._camera_marker_ns = None
+        self._camera_deadline = None
+        self._command_id = self.backend.start_task_command(resolved)
+        self._active_command = resolved
+        self._command_deadline = now + self._command_timeout_seconds(
+            resolved,
+            state,
+        )
+        self.on_status(
+            f'Task step {self._index + 1}/{len(self._task.commands)}: '
+            f'camera_linear_absolute resolved {command.object_id!r}'
+        )
+
+    def _next_step_is_camera(self) -> bool:
+        return (
+            self._task is not None
+            and self._index < len(self._task.commands)
+            and isinstance(
+                self._task.commands[self._index],
+                CameraLinearAbsoluteStep,
+            )
+        )
+
+    @staticmethod
+    def _step_can_run_with_stream(command) -> bool:
+        return (
+            isinstance(command, TaskCommand)
+            and command.kind in (
+                CommandKind.BASE_VELOCITY,
+                CommandKind.DELAY,
+            )
+        )
+
+    def _begin_camera_idle_barrier(
+        self,
+        state: TaskBackendState,
+        now: float,
+    ) -> None:
+        self._camera_idle_after_state_at = state.robot_state_updated_at
+        self._camera_idle_deadline = now + self.CAMERA_IDLE_TIMEOUT_SEC
+        self.on_status(
+            f'Task step {self._index + 1}/{len(self._task.commands)}: '
+            'waiting for a fresh idle robot state before camera capture'
+        )
+
+    def _tick_camera_idle_barrier(
+        self,
+        state: TaskBackendState,
+        now: float,
+    ) -> bool:
+        updated_at = state.robot_state_updated_at
+        previous = self._camera_idle_after_state_at
+        if (
+            updated_at is not None
+            and (previous is None or updated_at > previous)
+            and state.motion_active is False
+        ):
+            self._camera_idle_after_state_at = None
+            self._camera_idle_deadline = None
+            return True
+        if now >= float(self._camera_idle_deadline):
+            raise RuntimeError(
+                'robot did not report a fresh idle state before camera '
+                'capture'
+            )
+        return False
+
+    def _camera_unavailable_reason(self, object_id: str) -> str:
+        getter = getattr(self.camera, 'unavailable_reason', None)
+        if not callable(getter):
+            return ''
+        try:
+            return str(getter(object_id)).strip()
+        except Exception:
+            return ''
+
     def _tick_base(self, now: float) -> None:
         if self._base_velocity is None:
             raise RuntimeError('active base velocity is missing')
@@ -204,6 +393,10 @@ class PlannerTaskRunner:
         self._stream_deadline = now + 3.0
 
     def _complete_step(self) -> None:
+        self._camera_marker_ns = None
+        self._camera_deadline = None
+        self._camera_idle_after_state_at = None
+        self._camera_idle_deadline = None
         self._index += 1
         if self._task is not None:
             self.on_status(
@@ -240,6 +433,10 @@ class PlannerTaskRunner:
         self._base_velocity = None
         self._stream_target = None
         self._stream_deadline = 0.0
+        self._camera_marker_ns = None
+        self._camera_deadline = None
+        self._camera_idle_after_state_at = None
+        self._camera_idle_deadline = None
         if was_active:
             self.on_active_changed(False)
 

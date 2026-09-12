@@ -29,6 +29,7 @@ setup(
     entry_points={
         'console_scripts': [
             'planner = rby1_planner.main:main',
+            'planner_ui = rby1_planner.ui_main:main',
         ],
     },
 )

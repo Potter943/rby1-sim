@@ -1,0 +1,9 @@
+/**:
+  ros__parameters:
+    # Calibrate only these four values when the camera mount is finalized.
+    parent_frame: ee_right
+    # Attach to the RealSense root, not camera_color_optical_frame: the camera
+    # driver already owns the transforms below camera_link.
+    camera_frame: camera_link
+    translation_xyz: [0.0, 0.0, 0.0]
+    rotation_xyzw: [0.0, 0.0, 0.0, 1.0]

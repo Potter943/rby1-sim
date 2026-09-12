@@ -25,6 +25,12 @@ install(PROGRAMS
   RENAME mock_object_pose_publisher
 )
 
+install(PROGRAMS
+  scripts/camera_mount_tf_publisher.py
+  DESTINATION lib/${PROJECT_NAME}
+  RENAME camera_mount_tf_publisher
+)
+
 install(DIRECTORY
   launch
   config

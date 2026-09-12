@@ -1,0 +1,10 @@
+/**:
+  ros__parameters:
+    parent_frame: ee_right
+    camera_frame: camera_link
+    translation_xyz: [0.0, 0.0, 0.0]
+
+    # Simulated wrist camera: camera_link +X (forward) points along ee_right
+    # -Z, toward the upward-facing object below the gripper.
+    # This is +90 degrees about the parent-frame Y axis.
+    rotation_xyzw: [0.0, 0.7071067811865476, 0.0, 0.7071067811865476]

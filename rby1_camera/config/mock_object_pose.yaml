@@ -1,16 +1,25 @@
 /**:
   ros__parameters:
-    # Relative topic resolves to /rby1/perception/object_pose with the default
-    # launch namespace.
-    object_pose_topic: perception/object_pose
+    # Same message topic as the real apriltag_ros launch after remapping.
+    # Pose is carried by /tf, exactly as it is by apriltag_ros.
+    detections_topic: perception/object_pose
 
-    # One stable simulated detection. These coordinates validate the transport
-    # interface only; they are not a universally safe robot motion target.
-    object_id: tag_0
-    frame_id: base
-    position: [0.45, -0.20, 0.85]
-    orientation_xyzw: [0.0, 0.0, 0.0, 1.0]
-    confidence: 1.0
+    world_frame: base
+    camera_frame: camera_link
+    tag_frame: tag_0
+    tag_family: tag36h11
+    tag_id: 0
+
+    # Fixed object pose derived from object_gripping_initial_pose, not from the
+    # robot pose at mock-node startup.  In that posture ee_right/camera_link is
+    # [0.374015, -0.243156, 0.920902] in base, and this point is 20 cm along
+    # camera_link +X (down toward the object).  Starting the mock in ready_pose
+    # therefore no longer moves the synthetic object to a different location.
+    object_position_in_world_xyz: [0.373999, -0.243073, 0.720902]
+
+    # Identity in base keeps the tag/object +Z face pointing upward.
+    object_orientation_in_world_xyzw: [0.0, 0.0, 0.0, 1.0]
+    decision_margin: 100.0
 
     publish_rate_hz: 10.0
     enabled: true
